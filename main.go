@@ -5,101 +5,72 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 
-	"golang.org/x/net/html"
+	"github.com/VimleshS/html_parser/scraper"
 )
 
 func main() {
-	url := flag.String("url", "http://www.synerzip.com", "a blog url whose content to be parsed")
+	url := flag.String("url", "", "a blog url whose content to be parsed \n \thttp://www.synerzip.com")
+	directory := flag.String("d", "", "directory containing files \n \t/home/synerzip/Gate/raw_Data/Data")
+	outputdir := flag.String("o", "", "directory containing files (Required)\n \t/home/synerzip/Gate/raw_Data/p/")
 	flag.Parse()
 
-	// res, err := http.Get("http://www.synerzip.com/wcf-service-using-cassandra/")
-	res, err := http.Get(*url)
-	if err != nil {
-		fmt.Fprintf(os.Stdout, err.Error())
-	}
-	// body, err := ioutil.ReadAll(res.Body)
-	// if err != nil {
-	// 	fmt.Fprintf(os.Stdout, err.Error())
-	// }
-	// fmt.Fprintf(os.Stdout, string(body))
-
-	doc, err := html.Parse(res.Body)
-	if err != nil {
-		fmt.Fprintf(os.Stdout, err.Error())
+	if *outputdir == "" {
+		flag.PrintDefaults()
+		os.Exit(1)
 	}
 
-	var f func(*html.Node)
-	var f1 func(*html.Node)
+	if *url == "" && *directory == "" {
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
 
-	f1 = func(n *html.Node) {
-		if n.Type == html.TextNode {
-			if !(strings.Trim(n.Data, "\n") == "" || strings.Trim(n.Data, " ") == "") {
-				fmt.Println(n.Data)
+	if *url != "" {
+		res, err := http.Get(*url)
+		if err != nil {
+			fmt.Fprintf(os.Stdout, err.Error())
+		}
+		scrape := scraper.Scrape{Input: res.Body, Output: os.Stdout}
+		scrape.Scrape()
+
+	} else {
+		files := []string{}
+		filepath.Walk(*directory, func(path string, info os.FileInfo, err error) error {
+			if len(path) > 0 {
+				files = append(files, path)
 			}
-			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				f(c)
-			}
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			f1(c)
-		}
-	}
+			return nil
+		})
 
-	f = func(n *html.Node) {
-		if n.Type == html.ElementNode && n.Data == "div" {
-			for _, a := range n.Attr {
-				if a.Key == "class" && a.Val == "wpb_column vc_column_container vc_col-sm-8" {
-					f1(n)
-					break
-				}
-			}
-		}
+		var wg sync.WaitGroup
+		wg.Add(len(files))
+		for _, f := range files {
 
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			f(c)
-		}
-	}
-	f(doc)
+			go func(fpath string) {
+				defer wg.Done()
 
-	/*
-		    var f func(*html.Node, html.NodeType, string, string)
-			f = func(n *html.Node, nt html.NodeType, key string, value string) {
-
-				// if n.Type == nt && n.Data == "div" {
-				// 	for _, a := range n.Attr {
-				// 		if a.Key == key && a.Val == value {
-				// 			// fmt.Println(a.Val)
-				// 			//f(n, html.TextNode, "")
-				// 			break
-				// 		}
-				// 	}
-				// }
-
-				if n.Type == nt && n.Data == "div" {
-					for _, a := range n.Attr {
-						if a.Key == key && a.Val == value {
-							if key == "id" {
-								f(doc, html.ElementNode, "class", "wpb_column vc_column_container vc_col-sm-8")
-							} else {
-								f(n, html.TextNode, key, "")
-							}
-							break
-						}
-					}
-				} else if n.Type == html.TextNode {
-					if strings.Trim(n.Data, "\n") != "" {
-						fmt.Println(n.Data)
-					}
+				f, err := os.Open(fpath)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, err.Error())
 				}
 
-				for c := n.FirstChild; c != nil; c = c.NextSibling {
-					f(c, nt, key, value)
+				namepart := strings.Split(fpath, "/")
+				name := namepart[len(namepart)-1]
+				o, err := os.Create(*outputdir + name + ".txt")
+				if err != nil {
+					fmt.Fprintf(os.Stderr, err.Error())
 				}
-			}
-			// f(doc, html.ElementNode, "class", "wpb_column vc_column_container vc_col-sm-8")
-			f(doc, html.ElementNode, "id", "main")
-	*/
+				defer o.Close()
 
+				scrape := scraper.Scrape{Input: f, Output: o}
+				scrape.Scrape()
+
+			}(f)
+
+		}
+		wg.Wait()
+	}
 }
