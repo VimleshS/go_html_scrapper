@@ -59,6 +59,8 @@ func main() {
 
 				namepart := strings.Split(fpath, "/")
 				name := namepart[len(namepart)-1]
+				name = strings.Replace(name, " - Synerzip", "", -1)
+				name = strings.TrimSuffix(name, filepath.Ext(name))
 				o, err := os.Create(*outputdir + name + ".txt")
 				if err != nil {
 					fmt.Fprintf(os.Stderr, err.Error())
